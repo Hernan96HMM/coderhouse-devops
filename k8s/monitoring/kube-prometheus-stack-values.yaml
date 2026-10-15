@@ -1,0 +1,40 @@
+# Valores para kube-prometheus-stack (Prometheus + Alertmanager + Grafana).
+# Instalación: ver README, sección "Monitoreo".
+prometheus:
+  prometheusSpec:
+    # Detectar ServiceMonitors de cualquier namespace sin exigir label de release
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    retention: 3d              # retención corta = menos disco = menor costo
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+      limits:
+        memory: 800Mi
+
+alertmanager:
+  enabled: false               # no se usa en este proyecto; ahorra recursos
+
+grafana:
+  # La contraseña NO va en el repo: se pasa con --set grafana.adminPassword=$GRAFANA_PASSWORD
+  # o con un Secret existente (grafana.admin.existingSecret).
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  service:
+    type: ClusterIP          # acceder con: kubectl -n monitoring port-forward svc/kps-grafana 3001:80
+
+kubeStateMetrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true

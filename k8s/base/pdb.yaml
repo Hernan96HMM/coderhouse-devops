@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pf-devops-app
+  namespace: pf-devops
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pf-devops-app

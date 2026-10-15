@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Se aplica DESPUÉS de instalar kube-prometheus-stack (necesita sus CRDs)
+resources:
+  - servicemonitor.yaml
+  - alerts.yaml
+
+configMapGenerator:
+  - name: pf-devops-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/pf-devops.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

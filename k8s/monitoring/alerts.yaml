@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pf-devops-app-alerts
+  namespace: pf-devops
+spec:
+  groups:
+    - name: pf-devops-app
+      rules:
+        - alert: AppDown
+          expr: up{job="pf-devops-app"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "La app no responde al scraping"
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+              / sum(rate(http_requests_total[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Más del 5% de requests con error 5xx"

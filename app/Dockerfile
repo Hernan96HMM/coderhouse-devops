@@ -22,13 +22,13 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # Usuario no root
-RUN addgroup -S app && adduser -S app -G app
+RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 
 COPY --from=deps --chown=app:app /app/node_modules ./node_modules
 COPY --chown=app:app package.json ./
 COPY --chown=app:app src ./src
 
-USER app
+USER 10001
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

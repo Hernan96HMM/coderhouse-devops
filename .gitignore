@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars.secret
+kubeconfig*
+.DS_Store
+coverage/

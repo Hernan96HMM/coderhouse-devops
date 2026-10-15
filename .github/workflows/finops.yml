@@ -1,0 +1,55 @@
+name: FinOps (encender/apagar entorno)
+
+# Apaga los nodos del entorno de pruebas fuera de horario para no pagar cómputo ocioso.
+# Alternativa/complemento al apagado programado vía Terraform (aws_autoscaling_schedule).
+# El cron solo corre si la variable de repositorio ENABLE_FINOPS_SCHEDULE = "true".
+
+on:
+  schedule:
+    - cron: "0 1 * * 2-6"   # 22:00 Argentina (UTC-3): apagar
+    - cron: "0 11 * * 1-5"  # 08:00 Argentina: encender
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "scale-down o scale-up"
+        type: choice
+        options: [scale-down, scale-up]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scale:
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_FINOPS_SCHEDULE == 'true'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Decidir acción
+        id: act
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "action=${{ inputs.action }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 1 * * 2-6" ]; then
+            echo "action=scale-down" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=scale-up" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Escalar node group
+        run: |
+          CLUSTER="${{ vars.CLUSTER_NAME }}"
+          NG=$(aws eks list-nodegroups --cluster-name "$CLUSTER" --query 'nodegroups[0]' --output text)
+          if [ "${{ steps.act.outputs.action }}" = "scale-down" ]; then
+            aws eks update-nodegroup-config --cluster-name "$CLUSTER" --nodegroup-name "$NG" \
+              --scaling-config minSize=0,desiredSize=0
+          else
+            aws eks update-nodegroup-config --cluster-name "$CLUSTER" --nodegroup-name "$NG" \
+              --scaling-config minSize=1,desiredSize=2
+          fi
+          echo "Acción: ${{ steps.act.outputs.action }} sobre $NG" >> "$GITHUB_STEP_SUMMARY"

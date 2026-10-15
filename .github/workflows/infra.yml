@@ -1,0 +1,83 @@
+name: Infra (Terraform)
+
+on:
+  pull_request:
+    paths: ["terraform/**", ".github/workflows/infra.yml"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Entorno"
+        type: choice
+        options: [dev, prod]
+        default: dev
+      action:
+        description: "Acción"
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+
+permissions:
+  id-token: write # OIDC hacia AWS
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_IN_AUTOMATION: "true"
+  ENV_NAME: ${{ inputs.environment || 'dev' }}
+
+concurrency:
+  group: terraform-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    # "environment" permite exigir aprobación manual en GitHub antes de apply/destroy
+    environment: ${{ inputs.environment || 'dev' }}
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform fmt
+        # Informativo: corré `terraform fmt -recursive` localmente y quitá continue-on-error
+        continue-on-error: true
+        run: terraform fmt -check -recursive
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=pf-devops/${ENV_NAME}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ vars.TF_LOCK_TABLE }}"
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        if: inputs.action != 'destroy'
+        run: terraform plan -input=false -var-file=envs/${ENV_NAME}.tfvars -out=tfplan
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Terraform destroy
+        if: inputs.action == 'destroy'
+        run: terraform destroy -input=false -auto-approve -var-file=envs/${ENV_NAME}.tfvars
+
+      - name: Outputs
+        if: inputs.action == 'apply'
+        run: terraform output

@@ -1,0 +1,132 @@
+name: CD (Kubernetes + DAST)
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag de imagen a desplegar (por defecto el último commit de main)"
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+
+jobs:
+  deploy:
+    name: Desplegar en EKS
+    # Solo si el CI terminó bien (o si se lanzó a mano)
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      url: ${{ steps.url.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Configurar kubectl
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+
+      # ---- Componentes del cluster (idempotente: helm upgrade --install) ----
+      - name: metrics-server (necesario para el HPA)
+        run: |
+          helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+          helm upgrade --install metrics-server metrics-server/metrics-server \
+            --namespace kube-system --wait
+
+      - name: ingress-nginx
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx --create-namespace --wait
+
+      - name: kube-prometheus-stack (Prometheus + Grafana)
+        env:
+          GRAFANA_PW: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+            --namespace monitoring --create-namespace \
+            -f k8s/monitoring/kube-prometheus-stack-values.yaml \
+            --set-string grafana.adminPassword="$GRAFANA_PW" \
+            --wait --timeout 10m
+
+      # ---- Aplicación ----
+      - uses: imranismail/setup-kustomize@v2
+
+      - name: Fijar imagen del despliegue
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          TAG="${INPUT_TAG:-$RUN_SHA}"
+          cd k8s/base
+          kustomize edit set image "ghcr.io/OWNER/pf-devops-app=ghcr.io/${OWNER}/pf-devops-app:${TAG}"
+          sed -i "s/APP_VERSION=.*/APP_VERSION=${TAG:0:7}/" kustomization.yaml
+          grep -E "newName|newTag|APP_VERSION" kustomization.yaml
+
+      - name: Aplicar manifiestos
+        run: kubectl apply -k k8s/base
+
+      - name: Esperar rollout
+        run: kubectl -n pf-devops rollout status deployment/pf-devops-app --timeout=180s
+
+      - name: Aplicar monitoreo de la app (ServiceMonitor, alertas, dashboard)
+        run: kubectl apply -k k8s/monitoring
+
+      - name: Obtener URL pública del Ingress
+        id: url
+        run: |
+          for i in $(seq 1 30); do
+            HOST=$(kubectl -n ingress-nginx get svc ingress-nginx-controller \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            [ -n "$HOST" ] && break
+            sleep 10
+          done
+          echo "url=http://${HOST}" >> "$GITHUB_OUTPUT"
+          echo "URL: http://${HOST}"
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 20); do
+            curl -fsS "${{ steps.url.outputs.url }}/health" && exit 0
+            sleep 10
+          done
+          echo "La app no respondió" && exit 1
+
+      - name: Resumen
+        run: |
+          kubectl -n pf-devops get pods,svc,ingress,hpa -o wide | tee -a "$GITHUB_STEP_SUMMARY"
+
+  dast:
+    name: DAST (OWASP ZAP baseline)
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ needs.deploy.outputs.url }}
+          allow_issue_writing: false
+          fail_action: false # informativo; cambiar a true para bloquear
+          artifact_name: zap-report

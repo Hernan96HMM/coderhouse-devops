@@ -21,6 +21,15 @@ ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /app
 
+# Fuerza a BuildKit a ejecutar la etapa "test": si los tests fallan, no hay imagen.
+# (Sin esta dependencia, BuildKit omite las etapas que la imagen final no usa.)
+RUN --mount=type=bind,from=test,source=/app/package.json,target=/tmp/tests-passed true
+
+# La app solo necesita el binario "node" en runtime. Se eliminan npm, yarn y corepack
+# de la imagen base: reducen el tamaño y la superficie de ataque (ej. CVE en npm/tar).
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
+           /usr/local/bin/corepack /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 # Usuario no root
 RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 

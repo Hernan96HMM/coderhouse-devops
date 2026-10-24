@@ -54,7 +54,7 @@ jobs:
 
       # Análisis estático de Terraform y manifiestos Kubernetes (misconfiguraciones)
       - name: Trivy config (Terraform + Kubernetes)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (fijado por SHA)
         with:
           scan-type: config
           scan-ref: .
@@ -93,7 +93,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy - vulnerabilidades de la imagen
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (fijado por SHA)
         with:
           image-ref: pf-devops-app:scan
           severity: CRITICAL

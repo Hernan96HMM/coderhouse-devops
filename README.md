@@ -59,7 +59,9 @@ docker run --rm -p 3000:3000 pf-devops-app:local
 ### 1.3 En Kubernetes local (kind) — entorno de pruebas sin costo
 
 ```bash
-kind create cluster --name pf --config scripts/kind-config.yaml
+kind create cluster --name pf --config scripts/kind-config.yaml --image kindest/node:v1.34.0
+# Nota: fijar la imagen del nodo es necesario si Docker usa cgroup v1 (docker info | findstr Cgroup);
+# la versión por defecto de kind (K8s 1.37) ya no arranca en cgroup v1.
 docker build -t pf-devops-app:local ./app
 kind load docker-image pf-devops-app:local --name pf
 

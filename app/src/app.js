@@ -3,7 +3,18 @@ const client = require('prom-client');
 
 function createApp() {
   const app = express();
+  app.disable('x-powered-by'); // no revelar que se usa Express (hallazgo DAST)
   app.use(express.json());
+
+  // Cabeceras de seguridad (hallazgos DAST: X-Content-Type-Options y CSP)
+  app.use((_req, res, next) => {
+    res.set({
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; form-action 'none'",
+      'Cache-Control': 'no-store',
+    });
+    next();
+  });
 
   const register = new client.Registry();
   client.collectDefaultMetrics({ register });
@@ -67,6 +78,9 @@ function createApp() {
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   });
+
+  // 404 propio: evita la página de error por defecto de Express, que pisa nuestras cabeceras
+  app.use((_req, res) => res.status(404).json({ error: 'No encontrado' }));
 
   return app;
 }

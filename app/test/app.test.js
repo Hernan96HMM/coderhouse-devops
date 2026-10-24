@@ -40,3 +40,18 @@ test('GET /metrics expone métricas Prometheus', async () => {
   assert.strictEqual(res.status, 200);
   assert.match(text, /http_requests_total/);
 });
+
+test('Las respuestas incluyen cabeceras de seguridad y no revelan Express', async () => {
+  const res = await fetch(`${base}/health`);
+  assert.strictEqual(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  assert.strictEqual(res.headers.get('x-powered-by'), null);
+});
+
+test('Una ruta inexistente devuelve 404 en JSON con las mismas cabeceras', async () => {
+  const res = await fetch(`${base}/robots.txt`);
+  assert.strictEqual(res.status, 404);
+  assert.deepStrictEqual(await res.json(), { error: 'No encontrado' });
+  assert.match(res.headers.get('content-security-policy'), /form-action 'none'/);
+  assert.strictEqual(res.headers.get('x-powered-by'), null);
+});
